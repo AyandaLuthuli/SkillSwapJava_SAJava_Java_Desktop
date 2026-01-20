@@ -456,13 +456,6 @@ public class LoginPanel extends JFrame {
     }
 
     private void openDashboard(User user) {
-        // Debug: Check user object
-        System.out.println("Opening dashboard for user:");
-        System.out.println("  User object: " + user);
-        System.out.println("  User role: " + user.getRole());
-        System.out.println("  Is mentor: " + user.isMentor());
-        System.out.println("  Is learner: " + user.isLearner());
-
         this.dispose(); // Close login window
 
         SwingUtilities.invokeLater(() -> {
@@ -485,12 +478,8 @@ public class LoginPanel extends JFrame {
                 new MentorDashboard(user).setVisible(true);
             } else if (user.isLearner() && !user.isMentor()) {
                 // Learner only - open learner dashboard
-                System.out.println("Opening Learner Dashboard (placeholder)");
-                JOptionPane.showMessageDialog(null,
-                        "Learner dashboard coming soon!\nFor now, using combined dashboard.",
-                        "Coming Soon",
-                        JOptionPane.INFORMATION_MESSAGE);
-                new CombinedDashboard(user).setVisible(true);
+                System.out.println("Opening Learner Dashboard");
+                new LearnerDashboard(user).setVisible(true);
             } else if ("both".equals(role)) {
                 // Both roles - open combined dashboard
                 System.out.println("Opening Combined Dashboard");
@@ -506,7 +495,6 @@ public class LoginPanel extends JFrame {
             }
         });
     }
-
     private void handleSignup(String subjects, boolean agreedToTerms) {
         // Get form data
         String fullName = signupNameField.getText().trim();

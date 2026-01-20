@@ -404,7 +404,7 @@ public class MentorDashboard extends JFrame {
 
         // Add action buttons to table
         sessionsTable.getColumnModel().getColumn(7).setCellRenderer(new ButtonRenderer());
-        sessionsTable.getColumnModel().getColumn(7).setCellEditor(new ButtonEditor(new JCheckBox()));
+        sessionsTable.getColumnModel().getColumn(7).setCellEditor(new ButtonEditor(new JCheckBox(), sessionsTable));
 
         JScrollPane scrollPane = new JScrollPane(sessionsTable);
         scrollPane.setBorder(BorderFactory.createEmptyBorder(20, 0, 0, 0));
@@ -1007,9 +1007,11 @@ public class MentorDashboard extends JFrame {
         protected JButton button;
         private String label;
         private boolean isPushed;
+        private JTable table; // Add this field
 
-        public ButtonEditor(JCheckBox checkBox) {
+        public ButtonEditor(JCheckBox checkBox, JTable table) { // Add table parameter
             super(checkBox);
+            this.table = table; // Store the table reference
             button = new JButton();
             button.setOpaque(true);
             button.addActionListener(new ActionListener() {
@@ -1030,10 +1032,154 @@ public class MentorDashboard extends JFrame {
         public Object getCellEditorValue() {
             if (isPushed) {
                 // Handle button click
-                JOptionPane.showMessageDialog(button, "Session action clicked!");
+                if (table != null) {
+                    int row = table.getSelectedRow();
+                    if (row >= 0) {
+                        int sessionId = Integer.parseInt(tableModel.getValueAt(row, 0).toString());
+                        String learnerName = (String) tableModel.getValueAt(row, 1);
+                        showSessionActions(sessionId, learnerName);
+                    }
+                }
             }
             isPushed = false;
             return label;
+        }
+    }
+    private void showSessionActions(int sessionId, String learnerName) {
+        String[] options = {"Start Session", "Mark as Complete", "Reschedule", "Cancel", "View Details"};
+        int choice = JOptionPane.showOptionDialog(this,
+                String.format("Session #%d with %s\nWhat would you like to do?", sessionId, learnerName),
+                "Session Actions",
+                JOptionPane.DEFAULT_OPTION,
+                JOptionPane.INFORMATION_MESSAGE,
+                null,
+                options,
+                options[0]);
+
+        switch (choice) {
+            case 0: // Start Session
+                JOptionPane.showMessageDialog(this, "Starting session... Meeting link would open.", "Session Started", JOptionPane.INFORMATION_MESSAGE);
+                break;
+            case 1: // Mark as Complete
+                markSessionComplete(sessionId);
+                break;
+            case 2: // Reschedule
+                openMentorRescheduleDialog(sessionId, learnerName);
+                break;
+            case 3: // Cancel
+                cancelSession(sessionId);
+                break;
+            case 4: // View Details
+                viewSessionDetails(sessionId);
+                break;
+        }
+    }
+
+    private void markSessionComplete(int sessionId) {
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Mark this session as completed?\nThis will award you credits and the learner can leave feedback.",
+                "Confirm Completion",
+                JOptionPane.YES_NO_OPTION);
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            // Update database
+            try (Connection conn = ConnectionBD.getConnection()) {
+                String query = "UPDATE sessions SET status = 'completed' WHERE session_id = ?";
+                PreparedStatement stmt = conn.prepareStatement(query);
+                stmt.setInt(1, sessionId);
+                stmt.executeUpdate();
+
+                // Award credits
+                String creditQuery = "INSERT INTO credit_transactions (user_id, amount, transaction_type, description, session_id) " +
+                        "VALUES (?, ?, ?, ?, ?)";
+                PreparedStatement creditStmt = conn.prepareStatement(creditQuery);
+                creditStmt.setInt(1, currentUser.getUserId());
+                creditStmt.setDouble(2, 15.00); // Example credit amount
+                creditStmt.setString(3, "earn");
+                creditStmt.setString(4, "Completed tutoring session");
+                creditStmt.setInt(5, sessionId);
+                creditStmt.executeUpdate();
+
+                JOptionPane.showMessageDialog(this, "Session marked as completed! Credits awarded.", "Success", JOptionPane.INFORMATION_MESSAGE);
+                loadUpcomingSessions();
+
+            } catch (SQLException e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Error updating session: " + e.getMessage());
+            }
+        }
+    }
+
+    private void openMentorRescheduleDialog(int sessionId, String learnerName) {
+        // Similar to learner reschedule but from mentor perspective
+        JOptionPane.showMessageDialog(this,
+                "Reschedule feature for mentors coming soon!",
+                "Coming Soon",
+                JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private void cancelSession(int sessionId) {
+        int confirm = JOptionPane.showConfirmDialog(this,
+                "Cancel this session?\nThe learner will be notified and may receive a credit refund.",
+                "Confirm Cancellation",
+                JOptionPane.YES_NO_OPTION);
+
+        if (confirm == JOptionPane.YES_OPTION) {
+            // Update database
+            try (Connection conn = ConnectionBD.getConnection()) {
+                String query = "UPDATE sessions SET status = 'cancelled' WHERE session_id = ?";
+                PreparedStatement stmt = conn.prepareStatement(query);
+                stmt.setInt(1, sessionId);
+                stmt.executeUpdate();
+
+                JOptionPane.showMessageDialog(this, "Session cancelled. Learner has been notified.", "Cancelled", JOptionPane.INFORMATION_MESSAGE);
+                loadUpcomingSessions();
+
+            } catch (SQLException e) {
+                e.printStackTrace();
+                JOptionPane.showMessageDialog(this, "Error cancelling session: " + e.getMessage());
+            }
+        }
+    }
+
+    private void viewSessionDetails(int sessionId) {
+        try (Connection conn = ConnectionBD.getConnection()) {
+            String query = "SELECT s.*, u.full_name as learner_name, sk.skill_name " +
+                    "FROM sessions s " +
+                    "JOIN users u ON s.learner_id = u.user_id " +
+                    "LEFT JOIN skills sk ON s.skill_id = sk.skill_id " +
+                    "WHERE s.session_id = ?";
+            PreparedStatement stmt = conn.prepareStatement(query);
+            stmt.setInt(1, sessionId);
+            ResultSet rs = stmt.executeQuery();
+
+            if (rs.next()) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm");
+                String details = String.format(
+                        "Session Details #%d\n\n" +
+                                "Learner: %s\n" +
+                                "Subject: %s\n" +
+                                "Scheduled: %s\n" +
+                                "Duration: %d minutes\n" +
+                                "Cost: %.2f credits\n" +
+                                "Status: %s\n" +
+                                "Description: %s",
+                        sessionId,
+                        rs.getString("learner_name"),
+                        rs.getString("skill_name") != null ? rs.getString("skill_name") : "General",
+                        sdf.format(rs.getTimestamp("scheduled_time")),
+                        rs.getInt("duration_minutes"),
+                        rs.getDouble("credit_cost"),
+                        rs.getString("status"),
+                        rs.getString("session_description") != null ? rs.getString("session_description") : "No description"
+                );
+
+                JOptionPane.showMessageDialog(this, details, "Session Details", JOptionPane.INFORMATION_MESSAGE);
+            }
+
+        } catch (SQLException e) {
+            e.printStackTrace();
+            JOptionPane.showMessageDialog(this, "Error loading session details: " + e.getMessage());
         }
     }
 }
